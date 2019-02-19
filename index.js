@@ -4,10 +4,7 @@
 
 'use strict';
 
-// Node 6.10 compatibility
-var async = require('asyncawait/async');
-var await = require('asyncawait/await');
-
+const http = require('http');
 const https = require('https');
 var Promise = require('promise');
 var bodyJson = require("body/json");
@@ -15,18 +12,75 @@ var Colr = require("colr");
 
 let AlexaResponse = require("./alexa/AlexaResponse");
 
+// Setup HTTP server
+const server = http.createServer(handleHttpRequest);
+const port = 3001;
+
+server.listen(port, (err) => {
+    if (err) 
+    {
+        return console.log("Error creating server", err);
+    }
+
+    console.log("HippoLed lambda running on port", port);
+});
 
 
-exports.handler = async(function(event, context) {
+async function handleHttpRequest(request, response)
+{
+    console.log("Request", request.method, request.url);
+
+    // Validate request
+    var status = 200;
+    var statusMessage = "";
+    var message = null;             // The JSON body of the message that was sent to us
+
+    try
+    {
+        if (request.method != "POST") { statusMessage = "Only POST supported"; throw 405; }
+        if (! request.headers["content-type"] ) { statusMessage = "No Content-Type"; throw 400; }
+        if (request.headers["content-type"] != "application/json") { statusMessage = "Has to be application/json"; throw 400; }
+
+        // Decode body
+        statusMessage = "Bad JSON body";
+        message = await new Promise((resolve, reject) => {
+            bodyJson(request, function (err, body) {
+                if (err) reject(400); // Bad request
+                else resolve(body);
+            });
+        });
+
+        if ( (! message.header) || (! message.header.token)) { statusMessage = "No token specified"; throw 401; }
+        if ( ! message.payload ) { statusMessage = "No Alexa message"; throw 400; }
+
+        // All is well
+        statusMessage = "OK";
+    } 
+    catch (stat)
+    {
+        status = stat;
+    }
+
+    // Return 200 if message well received, or error code if not
+    // In case of 200, additional processing will take place asynchronously
+    // (and response to Alexa).
+    response.statusCode = status;
+    response.status = statusMessage;
+    response.end();
+
+    if (200 == status && null != message)
+    {
+        // (asynchronously) process Alexa message
+        handleAlexa(message.payload, message.header.token);
+    }
+}
+
+async function handleAlexa(event, token) 
+{
 
     // Dump the request for logging - check the CloudWatch logs
     console.log("index.handler request  ——");
     console.log(JSON.stringify(event));
-
-    if (context !== undefined) {
-        console.log("index.handler context  ——");
-        console.log(JSON.stringify(context));
-    }
 
     // Standard response if we don't know what to do
     let response = new AlexaResponse({
@@ -64,14 +118,9 @@ exports.handler = async(function(event, context) {
     let namespace = ((event.directive || {}).header || {}).namespace;
 
 
-    if (namespace.toLowerCase() === 'alexa.authorization') {
-        let aar = new AlexaResponse({ "namespace": "Alexa.Authorization", "name": "AcceptGrant.Response", });
-        return sendResponse(aar.get());
-    }
-
     if (namespace.toLowerCase() === 'alexa.discovery') {
-        let token = event.directive.payload.scope.token;
-        response = await(handleDiscovery(token));
+        handleDiscovery(token);
+        return;
     }
 
     var bPower = namespace.toLowerCase() === 'alexa.powercontroller';
@@ -82,7 +131,6 @@ exports.handler = async(function(event, context) {
     if (bStateChange) 
     {
         let endpoint_id = event.directive.endpoint.endpointId;
-        let token = event.directive.endpoint.scope.token;
         let correlationToken = event.directive.header.correlationToken;
 
         // Get current lamp state
@@ -94,6 +142,8 @@ exports.handler = async(function(event, context) {
         
         // Set lamp state
         var postPromise = hippoHttpsPostRequest("/hippoledd/webapi/lamp/" + endpoint_id, state, token);
+
+        // TODO: hieronder moet het nog aangepast worden
 
         // Construct Alexa response message
         response = handlePower(token);
@@ -121,15 +171,14 @@ exports.handler = async(function(event, context) {
     }
 
     sendResponse(response);
-});
+}
 
 function changeStatePower(state, onoff)
 {
     
 }
 
-//function handleDiscovery(token)
-var handleDiscovery = async(function (token)
+async function handleDiscovery(token)
 {
     let adr = new AlexaResponse({ "namespace": "Alexa.Discovery", "name": "Discover.Response" });
     let capability_alexa = adr.createPayloadEndpointCapability();
@@ -170,13 +219,13 @@ var handleDiscovery = async(function (token)
         adr.addPayloadEndpoint({ "friendlyName": lamp.Name, "endpointId": lamp.Name, "manufacturerName": "HippoTronics", "description": description, "capabilities": capabilities });
     });
 
-    return adr.get();
-});
+    // Send async response to Alexa
+    sendResponse(adr.get(), token);
+}
 
 
 
-//function hippoHttpsGetRequest(url, token)
-var hippoHttpsGetRequest = async (function (url, token)
+async function hippoHttpsGetRequest(url, token)
 {
     console.log("Executing HTTPS get to ", url);
 
@@ -203,10 +252,12 @@ var hippoHttpsGetRequest = async (function (url, token)
         });
 
     });
-});
+}
 
-function sendResponse(response) {
-    // TODO Validate the response
+async function sendResponse(response, token)
+{
+    // TODO Send async response to Alexa
+
     console.log("index.handler response ——");
     console.log(JSON.stringify(response));
     return response;

@@ -1,0 +1,22 @@
+{
+    "header": {
+        "token": "Atza|IwEBIJpTl5KUeVejGj0qBQifUa2VR010BPtSfIYRHmuzA1k0HvIYr6hmbeUTJVbpmoXX0aUnJIhl8q5lP4l10UVlN7HLA0iMHIAqZqguUkcQe9Tpk74j6s5-aFAgA8-dgGqnoeNdyhIMAVV5XWRf9utjjKKLQmkiEn9MD0XG0d9PeHN67ceUlY7Ej0y8acCwAzPVqcP0ZPXZl0E5a8PiETTK_FAQ_lisA-BgwTJgR5qzZZzIKzZtlHYqCaGIzrBrbe9lRUIenCTHUYt_Fb-szYLL526OsWAQpf9WoG7T_Ssv9vMbbNEmQMtXo6Xa-a9cx3U0uW_uh6VDeZMAU5x4LTbr0-4nFd6Exthzhfkh-aLhdLnzjLTSRr_Bd7JZNL5owVOr72wqXSOAuN2G6K7FvzFd9sJ4bplmtFjD9CZD9kRUWe_76SSKA9YfFhTPC1yINin0o2k5nWYBEqnMNJh1XUY3KiMK0JzGIs40R0yNkqD_nxitoKObuzvustxVuPOuN7ms_QBjNIcMpShN2s3pBtq7LALd"
+    },
+    "payload": {
+        "directive": {
+            "header": {
+                "namespace": "Alexa.Discovery",
+                "name": "Discover",
+                "payloadVersion": "3",
+                "messageId": "b3d4eb8a-8b99-4657-b7db-b3119eae9ec1"
+            },
+            "payload": {
+                "scope": {
+                    "type": "BearerToken",
+                    "token": "Atza|IwEBIJpTl5KUeVejGj0qBQifUa2VR010BPtSfIYRHmuzA1k0HvIYr6hmbeUTJVbpmoXX0aUnJIhl8q5lP4l10UVlN7HLA0iMHIAqZqguUkcQe9Tpk74j6s5-aFAgA8-dgGqnoeNdyhIMAVV5XWRf9utjjKKLQmkiEn9MD0XG0d9PeHN67ceUlY7Ej0y8acCwAzPVqcP0ZPXZl0E5a8PiETTK_FAQ_lisA-BgwTJgR5qzZZzIKzZtlHYqCaGIzrBrbe9lRUIenCTHUYt_Fb-szYLL526OsWAQpf9WoG7T_Ssv9vMbbNEmQMtXo6Xa-a9cx3U0uW_uh6VDeZMAU5x4LTbr0-4nFd6Exthzhfkh-aLhdLnzjLTSRr_Bd7JZNL5owVOr72wqXSOAuN2G6K7FvzFd9sJ4bplmtFjD9CZD9kRUWe_76SSKA9YfFhTPC1yINin0o2k5nWYBEqnMNJh1XUY3KiMK0JzGIs40R0yNkqD_nxitoKObuzvustxVuPOuN7ms_QBjNIcMpShN2s3pBtq7LALd"
+                }
+            }
+        }
+    }
+}
+
