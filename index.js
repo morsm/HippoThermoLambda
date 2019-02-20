@@ -12,6 +12,13 @@ var Colr = require("colr");
 
 let AlexaResponse = require("./alexa/AlexaResponse");
 
+const HIPPO_HOST = "192.168.1.6";
+const HIPPO_PORT = 9000;
+
+const ALEXA_HOST = "api.eu.amazonalexa.com";
+const ALEXA_URL = "/v3/events";
+
+
 // Setup HTTP server
 const server = http.createServer(handleHttpRequest);
 const port = 3001;
@@ -81,96 +88,75 @@ async function handleAlexa(event, token)
     // Dump the request for logging - check the CloudWatch logs
     console.log("index.handler request  ——");
     console.log(JSON.stringify(event));
-
-    // Standard response if we don't know what to do
-    let response = new AlexaResponse({
-        "name": "ErrorResponse",
-        "payload": {
-            "type": "INTERNAL_ERROR",
-            "message": "Unknown request"
-        }
-    }).get();
-
+ 
     // Validate we have an Alexa directive
-    if (!('directive' in event)) {
-        let aer = new AlexaResponse({
-            "name": "ErrorResponse",
-            "payload": {
-                "type": "INVALID_DIRECTIVE",
-                "message": "Missing key: directive, Is request a valid Alexa directive?"
-            }
-        });
-        return sendResponse(aer.get());
-    }
+    if (!('directive' in event)) return;
 
     // Check the payload version
-    if (event.directive.header.payloadVersion !== "3") {
-        let aer = new AlexaResponse({
-            "name": "ErrorResponse",
-            "payload": {
-                "type": "INTERNAL_ERROR",
-                "message": "This skill only supports Smart Home API version 3"
-            }
-        });
-        return sendResponse(aer.get());
-    }
+    if (event.directive.header.payloadVersion !== "3") return;
 
     let namespace = ((event.directive || {}).header || {}).namespace;
 
 
-    if (namespace.toLowerCase() === 'alexa.discovery') {
-        handleDiscovery(token);
-        return;
-    }
+    try{
 
-    var bPower = namespace.toLowerCase() === 'alexa.powercontroller';
-    var bBright = namespace.toLowerCase() === 'alexa.brightnesscontroller';
-    var bColor = namespace.toLowerCase() === 'alexa.colorcontroller';
-    var bStateChange = bPower || bBright || bColor;
-
-    if (bStateChange) 
-    {
-        let endpoint_id = event.directive.endpoint.endpointId;
-        let correlationToken = event.directive.header.correlationToken;
-
-        // Get current lamp state
-        var state = await (hippoHttpsGetRequest("/hippoledd/webapi/lamp/" + endpoint_id, token));
-        
-        if (bPower) changeStatePower(state, event.directive.header.name);
-        if (bBright) changeStateBright(state, event.directive.header.name, event.payload);
-        if (bColor) changeStateColor(state, event.payload);
-        
-        // Set lamp state
-        var postPromise = hippoHttpsPostRequest("/hippoledd/webapi/lamp/" + endpoint_id, state, token);
-
-        // TODO: hieronder moet het nog aangepast worden
-
-        // Construct Alexa response message
-        response = handlePower(token);
-        let power_state_value = "OFF";
-        let hippoUrl = '/hippotronics/off.html';
-
-        if (event.directive.header.name === "TurnOn") {
-            power_state_value = "ON";
-            hippoUrl = '/hippotronics/on.html';
+    
+        if (namespace.toLowerCase() === 'alexa.discovery') {
+            await handleDiscovery(token);
+            return;
         }
 
+        var bPower = namespace.toLowerCase() === 'alexa.powercontroller';
+        var bBright = namespace.toLowerCase() === 'alexa.brightnesscontroller';
+        var bColor = namespace.toLowerCase() === 'alexa.colorcontroller';
+        var bStateChange = bPower || bBright || bColor;
 
-        let ar = new AlexaResponse({
-            "correlationToken": correlationToken,
-            "token": token,
-            "endpointId": endpoint_id
-        });
-        ar.addContextProperty({ "namespace": "Alexa.PowerController", "name": "powerState", "value": power_state_value, "uncertaintyInMilliseconds": 1000 });
-        ar.addContextProperty({ "namespace": "Alexa.EndpointHealth", "name": "connectivity", "value": { "value": "OK" }, "uncertaintyInMilliseconds": 1000 });
+        if (bStateChange) 
+        {
+            let endpoint_id = event.directive.endpoint.endpointId;
+            let correlationToken = event.directive.header.correlationToken;
 
-        response = ar.get();
+            // Get current lamp state
+            var state = await (hippoHttpGetRequest("/webapi/lamp/" + endpoint_id, token));
+            
+            if (bPower) changeStatePower(state, event.directive.header.name);
+            if (bBright) changeStateBright(state, event.directive.header.name, event.payload);
+            if (bColor) changeStateColor(state, event.payload);
+            
+            // Set lamp state
+            var postPromise = hippoHttpPostRequest("/webapi/lamp/" + endpoint_id, state, token);
 
-        // Make sure the post request to Hippoledd succeeds before returning
-        await(postPromise);
+            // TODO: hieronder moet het nog aangepast worden
+
+            // Construct Alexa response message
+            response = handlePower(token);
+            let power_state_value = "OFF";
+            let hippoUrl = '/hippotronics/off.html';
+
+            if (event.directive.header.name === "TurnOn") {
+                power_state_value = "ON";
+                hippoUrl = '/hippotronics/on.html';
+            }
+
+
+            let ar = new AlexaResponse({
+                "correlationToken": correlationToken,
+                "token": token,
+                "endpointId": endpoint_id
+            });
+            ar.addContextProperty({ "namespace": "Alexa.PowerController", "name": "powerState", "value": power_state_value, "uncertaintyInMilliseconds": 1000 });
+            ar.addContextProperty({ "namespace": "Alexa.EndpointHealth", "name": "connectivity", "value": { "value": "OK" }, "uncertaintyInMilliseconds": 1000 });
+
+            response = ar.get();
+
+            // Make sure the post request to Hippoledd succeeds before returning
+            await(postPromise);
+        }
+
+    } catch (err)
+    {
+        console.log("Error processing directive", namespace, err);
     }
-
-    sendResponse(response);
 }
 
 function changeStatePower(state, onoff)
@@ -180,11 +166,15 @@ function changeStatePower(state, onoff)
 
 async function handleDiscovery(token)
 {
-    let adr = new AlexaResponse({ "namespace": "Alexa.Discovery", "name": "Discover.Response" });
+    let adr = new AlexaResponse({ "namespace": "Alexa.Discovery", "name": "Discover.AddOrUpdateReport" }); //Response" });
+    adr.event.payload.scope = {
+        type: "BearerToken",
+        token: token
+    };
     let capability_alexa = adr.createPayloadEndpointCapability();
 
     // Get information from Hippotronics service
-    var response = await(hippoHttpsGetRequest("/hippoledd/webapi/lamps", token));
+    var response = await hippoHttpGetRequest("/webapi/lamps");
     console.log("Hippo discovery lamp status: ");
     console.log(response);
 
@@ -220,25 +210,23 @@ async function handleDiscovery(token)
     });
 
     // Send async response to Alexa
-    sendResponse(adr.get(), token);
+    await sendResponse(adr.get(), token);
 }
 
 
 
-async function hippoHttpsGetRequest(url, token)
+async function hippoHttpGetRequest(url)
 {
-    console.log("Executing HTTPS get to ", url);
+    console.log("Executing HTTP get to", url);
 
     return new Promise((resolve, reject) => {
         var options = {
-            host: "amsterdam.termors.net",
-            path: url,
-            headers: {
-                "Authorization": "Bearer " + token
-            }
+            host: HIPPO_HOST,
+            port: HIPPO_PORT,
+            path: url
         };
 
-        https.get(options, (res) => {
+        http.get(options, (res) => {
             console.log("Hippotronics responds ", res.statusCode);
 
             if (200 == res.statusCode) 
@@ -254,12 +242,89 @@ async function hippoHttpsGetRequest(url, token)
     });
 }
 
+async function hippoHttpPostRequest(url, body)
+{
+    console.log("Sending POST to HippoTronics ----");
+    var bodyTxt = JSON.stringify(body);
+    console.log(bodyTxt);
+    
+    return new Promise( (resolve, reject) =>
+    {
+        var options = {
+            host: HIPPO_HOST,
+            port: HIPPO_PORT,
+            path: url,
+            method: 'POST',
+            headers: {
+                "Content-Type": "application/json",
+                "Content-Length": bodyTxt.length
+            }
+        };
+    
+        var req = http.request(options, (res) => {
+            console.log("Hippotronics responds ", res.statusCode);
+
+            if (200 == res.statusCode) resolve(res.statusCode); else 
+            {
+                var errorMessage = "Http Error: " + res.statusCode + " " + res.statusMessage;
+                console.log(errorMessage);
+                reject(errorMessage);
+            }
+        });
+        
+        req.on('error', (error) => {
+            console.log("On Error HTTP Request: " + error);
+            reject(error)
+        });
+        
+        req.write(bodyTxt);
+        req.end();
+    });
+}
+
+async function alexaPostRequest(body, token)
+{
+    console.log("Sending POST to Alexa ----");
+    var bodyTxt = JSON.stringify(body);
+    console.log(bodyTxt);
+    
+    return new Promise( (resolve, reject) =>
+    {
+        var options = {
+            host: ALEXA_HOST,
+            path: ALEXA_URL,
+            method: 'POST',
+            headers: {
+                "Authorization": "Bearer " + token,
+                "Content-Type": "application/json",
+                "Content-Length": bodyTxt.length
+            }
+        };
+    
+        var req = https.request(options, (res) => {
+            console.log("Alexa responds ", res.statusCode);
+
+            if (200 == res.statusCode) resolve(res.statusCode); else 
+            {
+                var errorMessage = "Http Error: " + res.statusCode + " " + res.statusMessage;
+                console.log(errorMessage);
+                reject(errorMessage);
+            }
+        });
+        
+        req.on('error', (error) => {
+            console.log("On Error HTTP Request: " + error);
+            reject(error)
+        });
+        
+        req.write(bodyTxt);
+        req.end();
+    });
+}
+
+
 async function sendResponse(response, token)
 {
-    // TODO Send async response to Alexa
-
-    console.log("index.handler response ——");
-    console.log(JSON.stringify(response));
-    return response;
+    await alexaPostRequest(response, token);
 }
 

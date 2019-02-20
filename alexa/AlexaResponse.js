@@ -70,7 +70,7 @@ class AlexaResponse {
         };
 
         // No endpoint in an AcceptGrant or Discover request
-        if (this.event.header.name === "AcceptGrant.Response" || this.event.header.name === "Discover.Response")
+        if (this.event.header.name === "AcceptGrant.Response" || this.event.header.name === "Discover.Response" || this.event.header.name === "Discover.AddOrUpdateReport")
             delete this.event.endpoint;
 
     }
