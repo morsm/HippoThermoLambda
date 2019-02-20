@@ -5,7 +5,6 @@
 'use strict';
 
 const http = require('http');
-const https = require('https');
 var Promise = require('promise');
 var bodyJson = require("body/json");
 var Colr = require("colr");
@@ -14,9 +13,6 @@ let AlexaResponse = require("./alexa/AlexaResponse");
 
 const HIPPO_HOST = "192.168.1.6";
 const HIPPO_PORT = 9000;
-
-const ALEXA_HOST = "api.eu.amazonalexa.com";
-const ALEXA_URL = "/v3/events";
 
 
 // Setup HTTP server
@@ -68,18 +64,32 @@ async function handleHttpRequest(request, response)
         status = stat;
     }
 
-    // Return 200 if message well received, or error code if not
-    // In case of 200, additional processing will take place asynchronously
-    // (and response to Alexa).
+    if (200 == status && null != message)
+    {
+        // Synchronously process Alexa message
+        try
+        {
+            var responseObj = await handleAlexa(message.payload, message.header.token);
+
+            var responseBody = JSON.stringify(responseObj);
+            console.log("Returning to Alexa", responseBody);
+            
+            response.setHeader("Content-Type", "application/json");
+            response.setHeader("Content-Length", responseBody.length);
+            response.write(responseBody);
+        }
+        catch (err)
+        {
+            console.log("Error processing Alexa request", err);
+
+            status = 500;
+            statusMessage = "Internal server error";
+        }
+    }
+
     response.statusCode = status;
     response.status = statusMessage;
     response.end();
-
-    if (200 == status && null != message)
-    {
-        // (asynchronously) process Alexa message
-        handleAlexa(message.payload, message.header.token);
-    }
 }
 
 async function handleAlexa(event, token) 
@@ -99,11 +109,9 @@ async function handleAlexa(event, token)
 
 
     try{
-
     
         if (namespace.toLowerCase() === 'alexa.discovery') {
-            await handleDiscovery(token);
-            return;
+            return await handleDiscovery();
         }
 
         var bPower = namespace.toLowerCase() === 'alexa.powercontroller';
@@ -164,13 +172,9 @@ function changeStatePower(state, onoff)
     
 }
 
-async function handleDiscovery(token)
+async function handleDiscovery()
 {
-    let adr = new AlexaResponse({ "namespace": "Alexa.Discovery", "name": "Discover.AddOrUpdateReport" }); //Response" });
-    adr.event.payload.scope = {
-        type: "BearerToken",
-        token: token
-    };
+    let adr = new AlexaResponse({ "namespace": "Alexa.Discovery", "name": "Discover.Response" });
     let capability_alexa = adr.createPayloadEndpointCapability();
 
     // Get information from Hippotronics service
@@ -206,11 +210,11 @@ async function handleDiscovery(token)
         else if (lamp.NodeType == 0) description += " with color and brightness control";
 
 
-        adr.addPayloadEndpoint({ "friendlyName": lamp.Name, "endpointId": lamp.Name, "manufacturerName": "HippoTronics", "description": description, "capabilities": capabilities });
+        adr.addPayloadEndpoint({ "friendlyName": lamp.Name, "endpointId": lamp.Name, "manufacturerName": "HippoTronics", "description": description, "capabilities": capabilities, "displayCategories": ["LIGHT"] });
     });
 
     // Send async response to Alexa
-    await sendResponse(adr.get(), token);
+    return adr.get();
 }
 
 
@@ -280,51 +284,5 @@ async function hippoHttpPostRequest(url, body)
         req.write(bodyTxt);
         req.end();
     });
-}
-
-async function alexaPostRequest(body, token)
-{
-    console.log("Sending POST to Alexa ----");
-    var bodyTxt = JSON.stringify(body);
-    console.log(bodyTxt);
-    
-    return new Promise( (resolve, reject) =>
-    {
-        var options = {
-            host: ALEXA_HOST,
-            path: ALEXA_URL,
-            method: 'POST',
-            headers: {
-                "Authorization": "Bearer " + token,
-                "Content-Type": "application/json",
-                "Content-Length": bodyTxt.length
-            }
-        };
-    
-        var req = https.request(options, (res) => {
-            console.log("Alexa responds ", res.statusCode);
-
-            if (200 == res.statusCode) resolve(res.statusCode); else 
-            {
-                var errorMessage = "Http Error: " + res.statusCode + " " + res.statusMessage;
-                console.log(errorMessage);
-                reject(errorMessage);
-            }
-        });
-        
-        req.on('error', (error) => {
-            console.log("On Error HTTP Request: " + error);
-            reject(error)
-        });
-        
-        req.write(bodyTxt);
-        req.end();
-    });
-}
-
-
-async function sendResponse(response, token)
-{
-    await alexaPostRequest(response, token);
 }
 
