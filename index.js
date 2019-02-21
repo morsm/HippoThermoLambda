@@ -184,8 +184,8 @@ async function handleStateChange(ns, event)
     
     // Alter lamp state
     if (bPower) stateChanged |= changeStatePower(state, event.directive.header.name);
-    if (bBright) stateChanged |= changeStateBright(state, event.directive.header.name, event.payload);
-    if (bColor) stateChanged |= changeStateColor(state, event.payload);
+    if (bBright) stateChanged |= changeStateBright(state, event.directive.header.name, event.directive.payload);
+    if (bColor) stateChanged |= changeStateColor(state, event.directive.payload);
     
     // Set lamp state
     var postPromise = null;
@@ -258,8 +258,26 @@ function changeStateBright(state, parameter, val)
 
 function changeStateColor(state, payload)
 {
-    // TODO
-    return false;
+    var newCol = Colr.fromHsl(payload.color.hue, payload.color.saturation * 100, payload.color.brightness * 100);
+    var newColHsl = newCol.toHslObject();
+    var existingCol = Colr.fromRgb(state.Red, state.Green, state.Blue);
+    var existingColHsl = existingCol.toHslObject();
+
+    // Set new color. Keep brightness constant per Alexa user experience directive.
+    var colToSet = Colr.fromHsl(newColHsl.h, newColHsl.s, existingColHsl.l);
+    var colToSetRgb = colToSet.toRgbObject();
+
+    // Color different?
+    var colDifferent = Math.abs(colToSetRgb.r - state.Red) >= 1 || Math.abs(colToSetRgb.g - state.Green) >= 1 || Math.abs(colToSetRgb.b - state.Blue) >= 1;
+    if (colDifferent)
+    {
+        // Write into the state
+        state.Red = colToSetRgb.r;
+        state.Green = colToSetRgb.g;
+        state.Blue = colToSetRgb.b;
+    }
+
+    return colDifferent;
 }
 
 async function handleDiscovery()
