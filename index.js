@@ -250,9 +250,44 @@ function changeStatePower(state, onoff)
     return stateChange;
 }
 
-function changeStateBright(state, parameter, val)
+function changeStateBright(state, parameter, payload)
 {
-    // TODO
+    var existingCol = Colr.fromRgb(state.Red, state.Green, state.Blue);
+    var existingColHsl = existingCol.toHslObject();
+    var existingBrightness = existingColHsl.l;
+    var newBrightness = existingBrightness;
+
+    if (parameter.toLowerCase() == 'adjustbrightness')
+    {
+        // Brightness delta
+        var delta = payload.brightnessDelta;
+        newBrightness = existingBrightness + delta;
+    }
+    else if (parameter.toLowerCase() == 'setbrightness')
+    {
+        // Absolute brightness value
+        newBrightness = payload.brightness;
+    }
+
+    // Bounds check. We clip brightness at 95%, otherwise we lose color information
+    if (newBrightness < 0) newBrightness = 0;
+    if (newBrightness > 95) newBrightness = 95;
+
+    if (newBrightness != existingBrightness)
+    {
+        // A change! Set in state
+        var newCol = Colr.fromHsl(existingColHsl.h, existingColHsl.s, newBrightness);
+        var newColRgb = newCol.toRgbObject();
+
+        state.Red = newColRgb.r;
+        state.Green = newColRgb.g;
+        state.Blue = newColRgb.b;
+
+        // Return true to indicate state has changed
+        return true;
+    }
+
+    // No change
     return false;
 }
 
