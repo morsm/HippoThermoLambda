@@ -105,71 +105,161 @@ async function handleAlexa(event, token)
     // Check the payload version
     if (event.directive.header.payloadVersion !== "3") return;
 
-    let namespace = ((event.directive || {}).header || {}).namespace;
+    let ns = (((event.directive || {}).header || {}).namespace).toLowerCase();
+    console.log("--- Alexa event:", ns);
 
-
-    try{
-    
-        if (namespace.toLowerCase() === 'alexa.discovery') {
+    try
+    {
+        if (ns === 'alexa.discovery') {
             return await handleDiscovery();
         }
 
-        var bPower = namespace.toLowerCase() === 'alexa.powercontroller';
-        var bBright = namespace.toLowerCase() === 'alexa.brightnesscontroller';
-        var bColor = namespace.toLowerCase() === 'alexa.colorcontroller';
-        var bStateChange = bPower || bBright || bColor;
-
-        if (bStateChange) 
+        if (ns == 'alexa' && event.directive.header.name.toLowerCase() == 'reportstate')
         {
-            let endpoint_id = event.directive.endpoint.endpointId;
-            let correlationToken = event.directive.header.correlationToken;
-
-            // Get current lamp state
-            var state = await (hippoHttpGetRequest("/webapi/lamp/" + endpoint_id, token));
-            
-            if (bPower) changeStatePower(state, event.directive.header.name);
-            if (bBright) changeStateBright(state, event.directive.header.name, event.payload);
-            if (bColor) changeStateColor(state, event.payload);
-            
-            // Set lamp state
-            var postPromise = hippoHttpPostRequest("/webapi/lamp/" + endpoint_id, state, token);
-
-            // TODO: hieronder moet het nog aangepast worden
-
-            // Construct Alexa response message
-            response = handlePower(token);
-            let power_state_value = "OFF";
-            let hippoUrl = '/hippotronics/off.html';
-
-            if (event.directive.header.name === "TurnOn") {
-                power_state_value = "ON";
-                hippoUrl = '/hippotronics/on.html';
-            }
-
-
-            let ar = new AlexaResponse({
-                "correlationToken": correlationToken,
-                "token": token,
-                "endpointId": endpoint_id
-            });
-            ar.addContextProperty({ "namespace": "Alexa.PowerController", "name": "powerState", "value": power_state_value, "uncertaintyInMilliseconds": 1000 });
-            ar.addContextProperty({ "namespace": "Alexa.EndpointHealth", "name": "connectivity", "value": { "value": "OK" }, "uncertaintyInMilliseconds": 1000 });
-
-            response = ar.get();
-
-            // Make sure the post request to Hippoledd succeeds before returning
-            await(postPromise);
+            return await handleStateRequest(event);
         }
+
+        // Handle one of the state change events
+        var bPower = ns === 'alexa.powercontroller';
+        var bBright = ns === 'alexa.brightnesscontroller';
+        var bColor = ns === 'alexa.colorcontroller';
+        if (bPower || bBright || bColor) return await handleStateChange(ns, event);
+
+        // If we reach this point, we have received a request we don't understand
+        throw("Unsupported request");
 
     } catch (err)
     {
-        console.log("Error processing directive", namespace, err);
+        console.log("Error processing directive", ns, err);
+
+        let aer = new AlexaResponse(
+            {
+                "name": "ErrorResponse",
+                "payload": {
+                    "type": "INVALID_DIRECTIVE",
+                    "message": err
+                }
+            });
+
+        return aer.get();
     }
+}
+
+async function handleStateRequest(event)
+{
+    let token = event.directive.endpoint.scope.token;
+    let endpoint_id = event.directive.endpoint.endpointId;
+    let correlationToken = event.directive.header.correlationToken;
+
+    // Get current lamp state
+    var state = await hippoHttpGetRequest("/webapi/lamp/" + endpoint_id);
+
+    let ar = new AlexaResponse({
+        "name": "StateReport",
+        "correlationToken": correlationToken,
+        "token": token,
+        "endpointId": endpoint_id
+    });
+
+    // Write the new lamp state into the Alexa response
+    setEndpointStateInAlexaResponse(ar, state);
+
+    // Return Alexa response
+    return ar.get();
+}
+
+async function handleStateChange(ns, event)
+{
+    var bPower = ns === 'alexa.powercontroller';
+    var bBright = ns === 'alexa.brightnesscontroller';
+    var bColor = ns === 'alexa.colorcontroller';
+
+    let token = event.directive.endpoint.scope.token;
+    let endpoint_id = event.directive.endpoint.endpointId;
+    let correlationToken = event.directive.header.correlationToken;
+
+    // Get current lamp state
+    var state = await hippoHttpGetRequest("/webapi/lamp/" + endpoint_id);
+    var stateChanged = false;
+    
+    // Alter lamp state
+    if (bPower) stateChanged |= changeStatePower(state, event.directive.header.name);
+    if (bBright) stateChanged |= changeStateBright(state, event.directive.header.name, event.payload);
+    if (bColor) stateChanged |= changeStateColor(state, event.payload);
+    
+    // Set lamp state
+    var postPromise = null;
+    if (stateChanged)
+        postPromise = hippoHttpPostRequest("/webapi/lamp/" + endpoint_id, state, token);
+
+    let ar = new AlexaResponse({
+        "correlationToken": correlationToken,
+        "token": token,
+        "endpointId": endpoint_id
+    });
+
+    // Write the new lamp state into the Alexa response
+    setEndpointStateInAlexaResponse(ar, state);
+
+    // Make sure the post request to Hippoledd succeeds before returning
+    if (postPromise != null) await(postPromise);
+
+    // Return Alexa response
+    return ar.get();
+}
+
+
+function setEndpointStateInAlexaResponse(ar, state)
+{
+    ar.addContextProperty({ "namespace": "Alexa.PowerController", "name": "powerState", "value": state.On ? "ON" : "OFF", "uncertaintyInMilliseconds": 1000 });
+    ar.addContextProperty({ "namespace": "Alexa.EndpointHealth", "name": "connectivity", "value": { "value": state.Online ? "OK" : "UNREACHABLE" }, "uncertaintyInMilliseconds": 1000 });
+
+    // Brightness and/or color?
+    if (state.NodeType < 2)
+    {
+        // Convert RGB to HSB
+        var colr = Colr.fromRgb(state.Red, state.Green, state.Blue);
+        var hsl = colr.toHslObject();
+
+        // Brightness
+        ar.addContextProperty({ "namespace": "Alexa.BrightnessController", "name": "brightness", "value": hsl.l, "uncertaintyInMilliseconds": 1000 });
+
+        // Color
+        if (state.NodeType == 0)
+        {
+            ar.addContextProperty({ "namespace": "Alexa.ColorController", "name": "color", "value": { "hue": hsl.h, "saturation": hsl.s / 100.0, "brightness": hsl.l / 100.0 }, "uncertaintyInMilliseconds": 1000 });
+        }
+    }
+
 }
 
 function changeStatePower(state, onoff)
 {
-    
+    let stateChange = false;
+
+    if (onoff === "TurnOn" && state.On == false) {
+        state.On = true;
+        stateChange = true;
+    }
+    else if (onoff == "TurnOff" && state.On)
+    {
+        state.On = false;
+        stateChange = true;
+    }
+
+    return stateChange;
+}
+
+function changeStateBright(state, parameter, val)
+{
+    // TODO
+    return false;
+}
+
+function changeStateColor(state, payload)
+{
+    // TODO
+    return false;
 }
 
 async function handleDiscovery()
@@ -185,21 +275,21 @@ async function handleDiscovery()
     response.forEach(function (lamp) 
     {
         // All endpoints support power and connectivity
-        let capability_alexa_powercontroller = adr.createPayloadEndpointCapability({ "interface": "Alexa.PowerController", "supported": [{ "name": "powerState" }], "proactivelyReported": true });
-        let capability_alexa_reporting = adr.createPayloadEndpointCapability({ "interface": "Alexa.EndpointHealth", "supported": [{ "name": "connectivity" }], "proactivelyReported": true });
+        let capability_alexa_powercontroller = adr.createPayloadEndpointCapability({ "interface": "Alexa.PowerController", "supported": [{ "name": "powerState" }], "proactivelyReported": false, "retrievable": true });
+        let capability_alexa_reporting = adr.createPayloadEndpointCapability({ "interface": "Alexa.EndpointHealth", "supported": [{ "name": "connectivity" }], "proactivelyReported": false, "retrievable": true });
 
         let capabilities = [capability_alexa_powercontroller, capability_alexa_reporting];
 
         // Endpoints 0 and 1 support brightness control
         if (lamp.NodeType < 2) {
-            let capability_alexa_brightness = adr.createPayloadEndpointCapability({ "interface": "Alexa.BrightnessController", "supported": [{ "name": "brightness" }], "proactivelyReported": true });
+            let capability_alexa_brightness = adr.createPayloadEndpointCapability({ "interface": "Alexa.BrightnessController", "supported": [{ "name": "brightness" }], "proactivelyReported": false, "retrievable": true });
 
             capabilities.push(capability_alexa_brightness);
         }
 
         // Endpoint type 0 supports color 
         if (lamp.NodeType == 0) {
-            let capability_alexa_color = adr.createPayloadEndpointCapability({ "interface": "Alexa.ColorController", "supported": [{ "name": "color" }], "proactivelyReported": true });
+            let capability_alexa_color = adr.createPayloadEndpointCapability({ "interface": "Alexa.ColorController", "supported": [{ "name": "color" }], "proactivelyReported": false, "retrievable": true });
 
             capabilities.push(capability_alexa_color);
         }
