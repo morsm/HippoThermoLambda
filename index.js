@@ -283,6 +283,10 @@ function changeStateBright(state, parameter, payload)
         state.Green = newColRgb.g;
         state.Blue = newColRgb.b;
 
+        // If brightness >0 and state is off, turn on
+        // Alexa does not send a separate power event
+        if (newBrightness > 0 && state.On == false) state.On = true;
+
         // Return true to indicate state has changed
         return true;
     }
