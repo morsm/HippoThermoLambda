@@ -10,14 +10,12 @@ var bodyJson = require("body/json");
 var Colr = require("colr");
 
 let AlexaResponse = require("./alexa/AlexaResponse");
-
-const HIPPO_HOST = "192.168.1.6";
-const HIPPO_PORT = 9000;
+let Config = require("./config.json");
 
 
 // Setup HTTP server
 const server = http.createServer(handleHttpRequest);
-const port = 3001;
+const port = Config.lambda_port;
 
 server.listen(port, (err) => {
     if (err) 
@@ -26,6 +24,7 @@ server.listen(port, (err) => {
     }
 
     console.log("HippoLed lambda running on port", port);
+    console.log("Sending requests to remote daemon at", Config.remote_host, "port", Config.remote_port);
 });
 
 
@@ -215,17 +214,23 @@ function setEndpointStateInAlexaResponse(ar, state)
     ar.addContextProperty({ "namespace": "Alexa.EndpointHealth", "name": "connectivity", "value": { "value": state.Online ? "OK" : "UNREACHABLE" }, "uncertaintyInMilliseconds": 1000 });
 
     // Brightness and/or color?
-    if (state.NodeType < 2)
+    let brightnessSupported = state.NodeType < 4;
+    let colorSupported = state.NodeType == 3;
+
+    if (brightnessSupported || colorSupported)
     {
         // Convert RGB to HSB
         var colr = Colr.fromRgb(state.Red, state.Green, state.Blue);
         var hsl = colr.toHslObject();
 
         // Brightness
-        ar.addContextProperty({ "namespace": "Alexa.BrightnessController", "name": "brightness", "value": hsl.l, "uncertaintyInMilliseconds": 1000 });
+        if (brightnessSupported)
+        {
+            ar.addContextProperty({ "namespace": "Alexa.BrightnessController", "name": "brightness", "value": hsl.l, "uncertaintyInMilliseconds": 1000 });
+        }
 
         // Color
-        if (state.NodeType == 0)
+        if (colorSupported)
         {
             ar.addContextProperty({ "namespace": "Alexa.ColorController", "name": "color", "value": { "hue": hsl.h, "saturation": hsl.s / 100.0, "brightness": hsl.l / 100.0 }, "uncertaintyInMilliseconds": 1000 });
         }
@@ -337,15 +342,35 @@ async function handleDiscovery()
 
         let capabilities = [capability_alexa_powercontroller, capability_alexa_reporting];
 
-        // Endpoints 0 and 1 support brightness control
-        if (lamp.NodeType < 2) {
+        // Lamp types:
+        //public enum NodeType
+        //{
+        //    Unknown,                // Not determined yet
+        //    LampDimmable,           // One color, dimmable 0-100%
+        //    LampColor1D,            // E.g. cool white to warm white, dimmable 0-100%
+        //    LampColorRGB,           // RGB led
+        //    Switch                  // On/off switch (e.g. relay)
+        //}
+
+        // 0 is actually equivalent to 3 - used for very old interfaces that didn't expose capabilities yet
+        // NodeType > 4 should not occur, but is not supported by this daemon, so we also treat it as unknown.
+        let nodeType = lamp.NodeType;
+        if (nodeType == 0 || nodeType > 4) nodeType = 3;
+
+        let brightnessSupported = nodeType < 4;
+        let colorSupported = nodeType == 3;
+
+        // TODO: we don't support color temp yet
+    
+        // Brightness control
+        if (brightnessSupported) {
             let capability_alexa_brightness = adr.createPayloadEndpointCapability({ "interface": "Alexa.BrightnessController", "supported": [{ "name": "brightness" }], "proactivelyReported": false, "retrievable": true });
 
             capabilities.push(capability_alexa_brightness);
         }
 
-        // Endpoint type 0 supports color 
-        if (lamp.NodeType == 0) {
+        // Color 
+        if (colorSupported) {
             let capability_alexa_color = adr.createPayloadEndpointCapability({ "interface": "Alexa.ColorController", "supported": [{ "name": "color" }], "proactivelyReported": false, "retrievable": true });
 
             capabilities.push(capability_alexa_color);
@@ -353,8 +378,8 @@ async function handleDiscovery()
 
         // Description from type 
         let description = "Lamp";
-        if (lamp.NodeType == 1) description += " with brightness control";
-        else if (lamp.NodeType == 0) description += " with color and brightness control";
+        if (brightnessSupported) description += " with control of brightness";
+        if (colorSupported) description += " and color";
 
 
         adr.addPayloadEndpoint({ "friendlyName": lamp.Name, "endpointId": lamp.Name, "manufacturerName": "HippoTronics", "description": description, "capabilities": capabilities, "displayCategories": ["LIGHT"] });
@@ -372,8 +397,8 @@ async function hippoHttpGetRequest(url)
 
     return new Promise((resolve, reject) => {
         var options = {
-            host: HIPPO_HOST,
-            port: HIPPO_PORT,
+            host: Config.remote_host,
+            port: Config.remote_port,
             path: url
         };
 
@@ -402,8 +427,8 @@ async function hippoHttpPostRequest(url, body)
     return new Promise( (resolve, reject) =>
     {
         var options = {
-            host: HIPPO_HOST,
-            port: HIPPO_PORT,
+            host: Config.remote_host,
+            port: Config.remote_port,
             path: url,
             method: 'POST',
             headers: {
