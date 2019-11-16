@@ -180,16 +180,41 @@ async function handleStateChange(ns, event)
     // Get current lamp state
     var state = await hippoHttpGetRequest("/webapi/lamp/" + endpoint_id);
     var stateChanged = false;
+    var setLampData = {
+        "OnChanged": false,
+        "On": true,
+        "BrightnessChanged": false,
+        "Brightness": 0.0,
+        "ColorChanged": false,
+        "Red"  : 0,
+        "Green": 0,
+        "Blue" : 0
+    };
     
     // Alter lamp state
-    if (bPower) stateChanged |= changeStatePower(state, event.directive.header.name);
-    if (bBright) stateChanged |= changeStateBright(state, event.directive.header.name, event.directive.payload);
-    if (bColor) stateChanged |= changeStateColor(state, event.directive.payload);
+    if (bPower) 
+    { 
+        setLampData.OnChanged = true;
+        stateChanged = true;
+        changeStatePower(setLampData, state, event.directive.header.name);
+    }
+    else if (bBright) 
+    {
+        setLampData.BrightnessChanged = true;
+        stateChanged = true;
+        changeStateBright(setLampData, state, event.directive.header.name, event.directive.payload);
+    }
+    else if (bColor) 
+    {
+        setLampData.ColorChanged = true;
+        stateChanged = true;
+        changeStateColor(setLampData, state, event.directive.payload);
+    }
     
     // Set lamp state
     var postPromise = null;
     if (stateChanged)
-        postPromise = hippoHttpPostRequest("/webapi/lamp/" + endpoint_id, state, token);
+        postPromise = hippoHttpPostRequest("/webapi/lampstate/" + endpoint_id, setLampData, token);
 
     let ar = new AlexaResponse({
         "correlationToken": correlationToken,
@@ -221,46 +246,39 @@ function setEndpointStateInAlexaResponse(ar, state)
     {
         // Convert RGB to HSB
         var colr = Colr.fromRgb(state.Red, state.Green, state.Blue);
-        var hsl = colr.toHslObject();
+        var hsv = colr.toHsvObject();
 
         // Brightness
         if (brightnessSupported)
         {
-            ar.addContextProperty({ "namespace": "Alexa.BrightnessController", "name": "brightness", "value": hsl.l, "uncertaintyInMilliseconds": 1000 });
+            ar.addContextProperty({ "namespace": "Alexa.BrightnessController", "name": "brightness", "value": hsv.v, "uncertaintyInMilliseconds": 1000 });
         }
 
         // Color
         if (colorSupported)
         {
-            ar.addContextProperty({ "namespace": "Alexa.ColorController", "name": "color", "value": { "hue": hsl.h, "saturation": hsl.s / 100.0, "brightness": hsl.l / 100.0 }, "uncertaintyInMilliseconds": 1000 });
+            ar.addContextProperty({ "namespace": "Alexa.ColorController", "name": "color", "value": { "hue": hsv.h, "saturation": hsv.s / 100.0, "brightness": hsv.v / 100.0 }, "uncertaintyInMilliseconds": 1000 });
         }
     }
 
 }
 
-function changeStatePower(state, onoff)
+function changeStatePower(setLampData, state, onoff)
 {
-    let stateChange = false;
-
     if (onoff === "TurnOn" && state.On == false) {
-        state.On = true;
-        stateChange = true;
+        state.On = setLampData.On = true;
     }
     else if (onoff == "TurnOff" && state.On)
     {
-        state.On = false;
-        stateChange = true;
+        state.On = setLampData.On = false;
     }
-
-    return stateChange;
 }
 
-function changeStateBright(state, parameter, payload)
+function changeStateBright(setLampData, state, parameter, payload)
 {
-    var stateChanged = false;
     var existingCol = Colr.fromRgb(state.Red, state.Green, state.Blue);
-    var existingColHsl = existingCol.toHslObject();
-    var existingBrightness = existingColHsl.l;
+    var existingColHsv = existingCol.toHsvObject();
+    var existingBrightness = existingColHsv.v;
     var newBrightness = existingBrightness;
 
     if (parameter.toLowerCase() == 'adjustbrightness')
@@ -277,55 +295,44 @@ function changeStateBright(state, parameter, payload)
 
     // Bounds check. We clip brightness at 95%, otherwise we lose color information
     if (newBrightness < 0) newBrightness = 0;
-    if (newBrightness > 95) newBrightness = 95;
+    if (newBrightness > 100) newBrightness = 100;
+//    if (newBrightness > 95) newBrightness = 95;
+    setLampData.Brightness = newBrightness / 100.0;
 
     if (newBrightness != existingBrightness)
     {
         // A change! Set in state
-        var newCol = Colr.fromHsl(existingColHsl.h, existingColHsl.s, newBrightness);
+        var newCol = Colr.fromHsv(existingColHsv.h, existingColHsv.s, newBrightness);
         var newColRgb = newCol.toRgbObject();
 
         state.Red = newColRgb.r;
         state.Green = newColRgb.g;
         state.Blue = newColRgb.b;
-
-        stateChanged = true;
     }
 
     // If brightness >0 and state is off, turn on
     // Alexa does not send a separate power event
     if (newBrightness > 0 && state.On == false) 
     {
-        state.On = true;
-        stateChanged = true;
+        state.On = setLampData.On = true;
+        setLampData.OnChanged = true;
     }
-
-    // Return if there was a change
-    return stateChanged;
 }
 
-function changeStateColor(state, payload)
+function changeStateColor(setLampData, state, payload)
 {
-    var newCol = Colr.fromHsl(payload.color.hue, payload.color.saturation * 100, payload.color.brightness * 100);
-    var newColHsl = newCol.toHslObject();
+    var newCol = Colr.fromHsv(payload.color.hue, payload.color.saturation * 100, payload.color.brightness * 100);
+    var newColHsv = newCol.toHsvObject();
     var existingCol = Colr.fromRgb(state.Red, state.Green, state.Blue);
-    var existingColHsl = existingCol.toHslObject();
+    var existingColHsv = existingCol.toHsvObject();
 
     // Set new color. Keep brightness constant per Alexa user experience directive.
-    var colToSet = Colr.fromHsl(newColHsl.h, newColHsl.s, existingColHsl.l);
+    var colToSet = Colr.fromHsv(newColHsv.h, newColHsv.s, existingColHsv.v);
     var colToSetRgb = colToSet.toRgbObject();
 
-    // Color different?
-    var colDifferent = Math.abs(colToSetRgb.r - state.Red) >= 1 || Math.abs(colToSetRgb.g - state.Green) >= 1 || Math.abs(colToSetRgb.b - state.Blue) >= 1;
-    if (colDifferent)
-    {
-        // Write into the state
-        state.Red = colToSetRgb.r;
-        state.Green = colToSetRgb.g;
-        state.Blue = colToSetRgb.b;
-    }
-
-    return colDifferent;
+    state.Red = setLampData.Red = colToSetRgb.r;
+    state.Green = setLampData.Green = colToSetRgb.g;
+    state.Blue = setLampData.Blue = colToSetRgb.b;
 }
 
 async function handleDiscovery()
