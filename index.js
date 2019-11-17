@@ -265,10 +265,10 @@ function setEndpointStateInAlexaResponse(ar, state)
 
 function changeStatePower(setLampData, state, onoff)
 {
-    if (onoff === "TurnOn" && state.On == false) {
+    if (onoff === "TurnOn") {
         state.On = setLampData.On = true;
     }
-    else if (onoff == "TurnOff" && state.On)
+    else if (onoff == "TurnOff")
     {
         state.On = setLampData.On = false;
     }
