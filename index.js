@@ -173,7 +173,7 @@ function setEndpointStateInAlexaResponse(ar, state)
     ar.addContextProperty({ 
         "namespace": "Alexa.ThermostatController", 
         "name": "thermostatMode", 
-        "value": "OFF" /* TODO */,
+        "value": "HEAT" /* TODO */,
         "uncertaintyInMilliseconds": 1000 }
         );
     ar.addContextProperty({ 
@@ -196,22 +196,28 @@ function setEndpointStateInAlexaResponse(ar, state)
         );
     
     
-    ar.addContextProperty({ "namespace": "Alexa.EndpointHealth", "name": "connectivity", "value": { "value": state.Online ? "OK" : "UNREACHABLE" }, "uncertaintyInMilliseconds": 1000 });
+    ar.addContextProperty({ 
+        "namespace": "Alexa.EndpointHealth", 
+        "name": "connectivity", 
+        "value": { 
+            "value": true /* TODO */ ? "OK" : "UNREACHABLE" }, 
+            "uncertaintyInMilliseconds": 1000 }
+            );
 }
 
 
 async function handleStateChange(ns, event)
 {
+    let token = event.directive.endpoint.scope.token;
+    let endpoint_id = event.directive.endpoint.endpointId;
+    let correlationToken = event.directive.header.correlationToken;
+
     // TODO: Thermo implementation
 
     /*
     var bPower = ns === 'alexa.powercontroller';
     var bBright = ns === 'alexa.brightnesscontroller';
     var bColor = ns === 'alexa.colorcontroller';
-
-    let token = event.directive.endpoint.scope.token;
-    let endpoint_id = event.directive.endpoint.endpointId;
-    let correlationToken = event.directive.header.correlationToken;
 
     // Get current lamp state
     // TODO: Thermo implementation
@@ -260,10 +266,11 @@ async function handleStateChange(ns, event)
     });
 
     // Write the new lamp state into the Alexa response
+    var state = true; // TODO
     setEndpointStateInAlexaResponse(ar, state);
 
     // Make sure the post request to Hippothermod succeeds before returning
-    if (postPromise != null) await(postPromise);
+    //if (postPromise != null) await(postPromise);
 
     // Return Alexa response
     return ar.get();
@@ -279,7 +286,7 @@ async function handleDiscovery()
     let capability_alexa_thermocontroller = 
         adr.createPayloadEndpointCapability({ 
             "interface": "Alexa.ThermostatController", 
-            "supported": [{ "name": "targetSetpoint" }], 
+            "supported": [{ "name": "targetSetpoint" }, { "name": "thermostatMode" }], 
             "proactivelyReported": false, 
             "retrievable": true });
     
@@ -296,7 +303,7 @@ async function handleDiscovery()
                 "retrievable": true });
         
     
-    let capabilities = { capability_alexa_thermocontroller, capability_alexa_thermosensor };
+    let capabilities = [ capability_alexa_thermocontroller, capability_alexa_thermosensor ];
 
     adr.addPayloadEndpoint({ 
         "friendlyName": "Hippotronics thermostat", 
