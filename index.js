@@ -149,9 +149,8 @@ async function handleStateRequest(event)
     let endpoint_id = event.directive.endpoint.endpointId;
     let correlationToken = event.directive.header.correlationToken;
 
-    // Get current lamp state
-    // TODO: Thermo implementation
-    var state = true; // await hippoHttpGetRequest("/webapi/lamp/" + endpoint_id);
+    // Get current thermostat state
+    var state = await hippoHttpGetRequest("/webapi/state/");
 
     let ar = new AlexaResponse({
         "name": "StateReport",
@@ -169,29 +168,23 @@ async function handleStateRequest(event)
 
 function setEndpointStateInAlexaResponse(ar, state)
 {
-    // TODO: Thermo implementation
+    // Thermo implementation
     ar.addContextProperty({ 
         "namespace": "Alexa.ThermostatController", 
         "name": "thermostatMode", 
-        "value": "HEAT" /* TODO */,
+        "value": state.HeatingOn ? "HEAT" : "ECO",
         "uncertaintyInMilliseconds": 1000 }
         );
     ar.addContextProperty({ 
         "namespace": "Alexa.ThermostatController", 
         "name": "targetSetpoint", 
-        "value": {
-            "value": 20.0 /* TODO */,
-            "scale": "CELSIUS"
-        },
+        "value": state.TargetTemperature,
         "uncertaintyInMilliseconds": 1000 }
         );
     ar.addContextProperty({ 
         "namespace": "Alexa.TemperatureSensor", 
         "name": "temperature", 
-        "value": {
-            "value": 20.0 /* TODO */,
-            "scale": "CELSIUS"
-        },
+        "value": state.RoomTemperature,
         "uncertaintyInMilliseconds": 1000 }
         );
     
@@ -211,66 +204,36 @@ async function handleStateChange(ns, event)
     let token = event.directive.endpoint.scope.token;
     let endpoint_id = event.directive.endpoint.endpointId;
     let correlationToken = event.directive.header.correlationToken;
+    let directive = event.directive.header.name.toLowerCase();
 
-    // TODO: Thermo implementation
-
-    /*
-    var bPower = ns === 'alexa.powercontroller';
-    var bBright = ns === 'alexa.brightnesscontroller';
-    var bColor = ns === 'alexa.colorcontroller';
-
-    // Get current lamp state
-    // TODO: Thermo implementation
-    var state = await hippoHttpGetRequest("/webapi/lamp/" + endpoint_id);
-    var stateChanged = false;
-    var setLampData = {
-        "OnChanged": false,
-        "On": true,
-        "BrightnessChanged": false,
-        "Brightness": 0.0,
-        "ColorChanged": false,
-        "Red"  : 0,
-        "Green": 0,
-        "Blue" : 0
-    };
-    
-    // Alter lamp state
-    if (bPower) 
-    { 
-        setLampData.OnChanged = true;
-        stateChanged = true;
-        changeStatePower(setLampData, state, event.directive.header.name);
-    }
-    else if (bBright) 
+    // Thermo implementation
+    if (directive == "settargettemperature")
     {
-        setLampData.BrightnessChanged = true;
-        stateChanged = true;
-        changeStateBright(setLampData, state, event.directive.header.name, event.directive.payload);
+        // Obtain new target temperature
+        var tNewTemp = event.directive.payload.targetSetpoint;
+
+        // Send new temperature
+        await hippoHttpPostRequest("/webapi/targettemp", tNewTemp);
     }
-    else if (bColor) 
+    else if (directive == "adjusttargettemperature")
     {
-        setLampData.ColorChanged = true;
-        stateChanged = true;
-        changeStateColor(setLampData, state, event.directive.payload);
+        // Obtain new target temperature
+        var tNewTemp = event.directive.payload.targetSetpointDelta;
+
+        // Send new temperature
+        await hippoHttpPostRequest("/webapi/tempdelta", tNewTemp);
     }
-    
-    // Set lamp state
-    var postPromise = null;
-    if (stateChanged)
-        postPromise = hippoHttpPostRequest("/webapi/lampstate/" + endpoint_id, setLampData, token);
-*/
+
+
     let ar = new AlexaResponse({
         "correlationToken": correlationToken,
         "token": token,
         "endpointId": endpoint_id
     });
 
-    // Write the new lamp state into the Alexa response
-    var state = true; // TODO
+    // Write the new thermostat state into the Alexa response
+    var state = await hippoHttpGetRequest("/webapi/state/");
     setEndpointStateInAlexaResponse(ar, state);
-
-    // Make sure the post request to Hippothermod succeeds before returning
-    //if (postPromise != null) await(postPromise);
 
     // Return Alexa response
     return ar.get();
