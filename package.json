@@ -1,7 +1,7 @@
 {
-  "name": "hippolambda",
+  "name": "hippothermolambda",
   "version": "1.0.0",
-  "description": "Lambda function for HippoTronics LED lights (local version)",
+  "description": "Lambda function for HippoTronics thermostat (local version)",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
